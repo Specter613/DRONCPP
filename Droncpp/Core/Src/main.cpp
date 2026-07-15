@@ -25,6 +25,7 @@
 #include "usbd_cdc_if.h"
 #include "mpu6500.hpp"
 #include "qmc5883p.hpp"
+#include "gnss.hpp"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,6 +55,7 @@ DMA_HandleTypeDef hdma_uart4_tx;
 /* USER CODE BEGIN PV */
 static MPU6500 imu(&hspi2);
 static QMC5883 mag(&hi2c1);
+static Gnss gps(&huart4);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,6 +115,9 @@ int main(void)
   imu.CalibrateGyro();
   imu.CalibrateAccel();
   mag.Init();
+  gps.Init();
+  gps.SetMode(GnssMode::Stationary);
+  HAL_Delay(250);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -135,7 +140,7 @@ int main(void)
       HAL_Delay(100);*/
       mag.Process();         // usa el roll/pitch fresco del gyro
       mag.ComputeHeading(imu.GetData().roll, imu.GetData().pitch);   // calcula heading aparte
-
+      /*
       const QMC5883Data &d = mag.GetData();
 
       static char msg[100];
@@ -144,7 +149,34 @@ int main(void)
           d.mx, d.my, d.mz, d.heading);
 
       CDC_Transmit_FS((uint8_t*)msg, len);
-      HAL_Delay(100);
+      HAL_Delay(100);*/
+      static uint32_t lastGpsUpdate = 0;
+          if(HAL_GetTick() - lastGpsUpdate >= 200)
+          {
+              lastGpsUpdate = HAL_GetTick();
+              gps.Update();
+
+              const GnssData &d = gps.GetData();
+              static char msg[300];
+              int len = snprintf(msg, sizeof(msg),
+                  "GPS\r\n"
+                  "Day: %d-%d-%d\r\n"
+                  "Time: %d:%d:%d\r\n"
+                  "Status of fix: %d\r\n"
+                  "Sat used: %d  Sat count: %d\r\n"
+                  "Lat: %f  Lon: %f\r\n"
+                  "Height ellip.(m): %f  Height MSL(m): %f\r\n"
+                  "Ground Speed(2D): %ld\r\n",
+                  d.day, d.month, d.year,
+                  d.hour, d.min, d.sec,
+                  d.fixType,
+                  d.numSV, d.satCount,
+                  d.fLat, d.fLon,
+                  static_cast<float>(d.height) / 1000.0f,
+                  static_cast<float>(d.hMSL) / 1000.0f,
+                  d.gSpeed);
+              CDC_Transmit_FS((uint8_t*)msg, len);
+          }
   }
   /* USER CODE END 3 */
 }
