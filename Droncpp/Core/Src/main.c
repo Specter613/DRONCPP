@@ -23,11 +23,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
-#include "mpu6500.hpp"
-#include "qmc5883p.hpp"
-#include "gnss.hpp"
-#include "mtf02.hpp"
-#include "crsf.hpp"
+//#include "mpu6500.hpp"
+//#include "qmc5883p.hpp"
+//#include "gnss.hpp"
+//#include "mtf02.hpp"
+//#include "crsf.hpp"
+#include "puente.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,12 +59,12 @@ DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-static MPU6500 imu(&hspi2);
-static QMC5883 mag(&hi2c1);
-static Gnss gps(&huart4);
-static MTF01 flow(&huart6);
-static CRSF_Radio radioData;
-static CRSF radio(&huart2);
+//static MPU6500 imu(&hspi2);
+//static QMC5883 mag(&hi2c1);
+//static Gnss gps(&huart4);
+//static MTF01 flow(&huart6);
+//static CRSF_Radio radioData;
+//static CRSF radio(&huart2);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -121,15 +122,16 @@ int main(void)
   MX_USART6_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  imu.Init();
-  imu.CalibrateGyro();
-  imu.CalibrateAccel();
-  mag.Init();
-  gps.Init();
-  gps.SetMode(GnssMode::Stationary);
-  HAL_Delay(250);
-  flow.Init();
-  radio.Init(&radioData);
+  //imu.Init();
+  //imu.CalibrateGyro();
+  //imu.CalibrateAccel();
+  //mag.Init();
+  //gps.Init();
+  //gps.SetMode(GnssMode::Stationary);
+  //HAL_Delay(250);
+  //flow.Init();
+  //radio.Init(&radioData);
+  App_Init();
 
   /* USER CODE END 2 */
 
@@ -140,20 +142,33 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  	  imu.Process();
-	      /*const MPU6500_Data &d = imu.GetData();
+	  App_Loop();
+	  	  /*imu.Process();
+	      const MPU6500_Data &d = imu.GetData();
 
-	      static char msg[150];
+	      static char msg[150];    imu.Process();
+    mag.Process();
+    mag.ComputeHeading(imu.GetData().roll, imu.GetData().pitch);
+    radio.Process();
+
+    static uint32_t lastGpsUpdate = 0;
+    if(HAL_GetTick() - lastGpsUpdate >= 200)
+    {
+        lastGpsUpdate = HAL_GetTick();
+        gps.Update();
+        // impresión...
+    }
+    // resto de la lógica de impresión...
 	      int len = snprintf(msg, sizeof(msg),"AX:%.2f AY:%.2f AZ:%.2f\r\n"
 											  "GX:%.2f GY:%.2f GZ:%.2f \r\n"
 	    		  	  	  	  	  	  	  	  "Roll:%.2f Pitch:%.2f\r\n",
 											  d.ax, d.ay, d.az, d.gx, d.gy, d.gz, d.roll, d.pitch);
 
 	      CDC_Transmit_FS((uint8_t*)msg, len);
-	      HAL_Delay(100);*/
+	      HAL_Delay(100);
 	      mag.Process();         // usa el roll/pitch fresco del gyro
 	      mag.ComputeHeading(imu.GetData().roll, imu.GetData().pitch);   // calcula heading aparte
-	      /*
+
 	      const QMC5883Data &d = mag.GetData();
 
 	      static char msg[100];
@@ -162,8 +177,8 @@ int main(void)
 	          d.mx, d.my, d.mz, d.heading);
 
 	      CDC_Transmit_FS((uint8_t*)msg, len);
-	      HAL_Delay(100);*/
-	      /*static uint32_t lastGpsUpdate = 0;
+	      HAL_Delay(100);
+	      static uint32_t lastGpsUpdate = 0;
 	          if(HAL_GetTick() - lastGpsUpdate >= 200)
 	          {
 	              lastGpsUpdate = HAL_GetTick();
@@ -189,8 +204,8 @@ int main(void)
 	                  static_cast<float>(d.hMSL) / 1000.0f,
 	                  d.gSpeed);
 	              CDC_Transmit_FS((uint8_t*)msg, len);
-	          }*/
-	      /*const MTF01_Data &d = flow.GetData();
+	          }
+	      const MTF01_Data &d = flow.GetData();
 
 	      static uint32_t lastFlowUpdate = 0;
 	      if(HAL_GetTick() - lastFlowUpdate >= 100)
@@ -207,7 +222,7 @@ int main(void)
 	              d.quality, d.status);
 
 	          CDC_Transmit_FS((uint8_t*)msg, len);
-	      }*/
+	      }
 	      radio.Process();
 
 	      if(radio.NewFrameAvailable() || true)  // o simplemente lee cuando quieras
@@ -219,7 +234,7 @@ int main(void)
 	              radioData.status, radioData.activeChannels,
 	              radioData.ch[0], radioData.ch[1], radioData.ch[2], radioData.ch[3]);
 	          CDC_Transmit_FS((uint8_t*)msg, len);
-	      }
+	      }*/
   }
   /* USER CODE END 3 */
 }
