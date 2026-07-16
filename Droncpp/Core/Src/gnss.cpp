@@ -8,7 +8,7 @@
 #include <cstring>
 
 extern "C" void Error_Handler(void);
-// ---- Comandos UBX, privados a este archivo ----
+
 static const uint8_t kConfigUBX[]   = {0xB5,0x62,0x06,0x00,0x14,0x00,0x01,0x00,0x00,0x00,0xD0,0x08,0x00,0x00,0x00,0xC2,0x01,0x00,0x03,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0xBA,0x52};
 static const uint8_t kSetRateTo5hz[] = {0xB5,0x62,0x06,0x08,0x06,0x00,0xC8,0x00,0x01,0x00,0x01,0x00,0xDE,0x6A};
 static const uint8_t kSetGNSS[]     = {0xB5,0x62,0x06,0x3E,0x24,0x00,0x00,0x00,0x20,0x04,0x00,0x08,0x10,0x00,0x01,0x00,0x01,0x01,0x01,0x01,0x03,0x00,0x01,0x00,0x01,0x01,0x02,0x04,0x08,0x00,0x01,0x00,0x01,0x01,0x06,0x08,0x0E,0x00,0x01,0x00,0x01,0x01,0xDF,0xFB};
@@ -21,18 +21,15 @@ static const uint8_t kGetNAVSAT[]        = {0xB5,0x62,0x01,0x35,0x00,0x00,0x36,0
 
 static const uint8_t kSetStationaryMode[] = {0xB5,0x62,0x06,0x24,0x24,0x00,0xFF,0xFF,0x02,0x03,0x00,0x00,0x00,0x00,0x10,0x27,0x00,0x00,0x05,0x00,0xFA,0x00,0xFA,0x00,0x64,0x00,0x5E,0x01,0x00,0x3C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0x80};
 static const uint8_t kSetPortableMode[]   = {0xB5,0x62,0x06,0x24,0x24,0x00,0xFF,0xFF,0x00,0x03,0x00,0x00,0x00,0x00,0x10,0x27,0x00,0x00,0x05,0x00,0xFA,0x00,0xFA,0x00,0x64,0x00,0x5E,0x01,0x00,0x3C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7E,0x3C};
-// ... (agrega el resto de modos igual, mismo patrón, si los usas)
 
 Gnss::Gnss(UART_HandleTypeDef *huart) : huart_(huart) {}
 
 void Gnss::Init()
 {
     data_ = GnssData{};
-    LoadConfig();       // manda configUBX, que le dice al GPS "cambia a 115200"
+    LoadConfig();
     HAL_Delay(300);
 
-    // El GPS ya cambió a 115200 — ahora hay que reconfigurar TAMBIÉN
-    // nuestro lado de la UART para que hable al mismo baudrate
     HAL_UART_Abort_IT(huart_);
     HAL_UART_DeInit(huart_);
     huart_->Init.BaudRate = 115200;
@@ -63,12 +60,13 @@ void Gnss::SetMode(GnssMode mode)
         case GnssMode::Stationary:
             HAL_UART_Transmit_DMA(huart_, kSetStationaryMode, sizeof(kSetStationaryMode));
             break;
-        // ... resto de modos según los necesites
         default:
             break;
     }
 }
 
+// Sin memset en ninguna de las dos — comportamiento consistente y sin
+// condiciones de carrera con el abort/rearm de la UART.
 void Gnss::RequestPVT()
 {
     HAL_UART_AbortReceive_IT(huart_);
@@ -117,13 +115,12 @@ void Gnss::RequestPOSLLH()
 void Gnss::Update()
 {
     ParseBuffer();
+
     if(requestNavSat_)
         RequestNAVSAT();
     else
         RequestPVT();
     requestNavSat_ = !requestNavSat_;
-
-
 }
 
 void Gnss::ComputeChecksum(const uint8_t *buffer, uint16_t start, uint16_t len,
@@ -140,7 +137,7 @@ void Gnss::ComputeChecksum(const uint8_t *buffer, uint16_t start, uint16_t len,
 
 void Gnss::ParseBuffer()
 {
-    for(int var = 0; var <= 200; ++var)
+    for(int var = 0; var <= kBufferSize - 8; ++var)
     {
         if(uartBuffer_[var] == 0xB5 && uartBuffer_[var + 1] == 0x62)
         {
@@ -148,13 +145,20 @@ void Gnss::ParseBuffer()
             uint8_t msgId    = uartBuffer_[var + 3];
             uint16_t payloadLen = uartBuffer_[var + 4] | (uartBuffer_[var + 5] << 8);
 
+            // Validación de límites: si el mensaje reportado no cabe
+            // en el buffer, descártalo sin leer memoria fuera de rango.
+            if(var + 6 + payloadLen + 1 >= kBufferSize)
+            {
+                continue;
+            }
+
             uint8_t ckA, ckB;
             ComputeChecksum(uartBuffer_, var + 2, 4 + payloadLen, ckA, ckB);
 
             uint8_t recvCkA = uartBuffer_[var + 6 + payloadLen];
             uint8_t recvCkB = uartBuffer_[var + 6 + payloadLen + 1];
 
-            if(ckA != recvCkA || ckB != recvCkB) continue;   // mensaje corrupto
+            if(ckA != recvCkA || ckB != recvCkB) continue;
 
             if(msgClass == 0x27 && msgId == 0x03)       ParseUniqID();
             else if(msgClass == 0x01 && msgId == 0x21)  ParseNavigatorData();
@@ -207,6 +211,7 @@ void Gnss::ParseNavigatorData()
 
 void Gnss::ParseNAVSAT()
 {
+    // numSvs vive en el byte 11 (después de header/class/id/len/iTOW/version)
     data_.satCount = uartBuffer_[11];
 }
 
@@ -223,6 +228,4 @@ void Gnss::ParsePOSLLH()
     memcpy(&data_.hAcc,   &uartBuffer_[26], sizeof(uint32_t));
     memcpy(&data_.vAcc,   &uartBuffer_[30], sizeof(uint32_t));
 }
-
-
 

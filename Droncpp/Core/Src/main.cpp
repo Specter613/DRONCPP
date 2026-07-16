@@ -26,6 +26,8 @@
 #include "mpu6500.hpp"
 #include "qmc5883p.hpp"
 #include "gnss.hpp"
+#include "mtf02.hpp"
+#include "crsf.hpp"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,13 +51,19 @@ I2C_HandleTypeDef hi2c1;
 SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart4;
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_uart4_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 static MPU6500 imu(&hspi2);
 static QMC5883 mag(&hi2c1);
 static Gnss gps(&huart4);
+static MTF01 flow(&huart6);
+static CRSF_Radio radioData;
+static CRSF radio(&huart2);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,6 +74,7 @@ static void MX_SPI2_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USART6_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -110,6 +119,7 @@ int main(void)
   MX_I2C1_Init();
   MX_UART4_Init();
   MX_USART6_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   imu.Init();
   imu.CalibrateGyro();
@@ -118,6 +128,9 @@ int main(void)
   gps.Init();
   gps.SetMode(GnssMode::Stationary);
   HAL_Delay(250);
+  flow.Init();
+  radio.Init(&radioData);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -127,56 +140,86 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      imu.Process();
-      /*const MPU6500_Data &d = imu.GetData();
+	  	  imu.Process();
+	      /*const MPU6500_Data &d = imu.GetData();
 
-      static char msg[150];
-      int len = snprintf(msg, sizeof(msg),"AX:%.2f AY:%.2f AZ:%.2f\r\n"
-										  "GX:%.2f GY:%.2f GZ:%.2f \r\n"
-    		  	  	  	  	  	  	  	  "Roll:%.2f Pitch:%.2f\r\n",
-										  d.ax, d.ay, d.az, d.gx, d.gy, d.gz, d.roll, d.pitch);
+	      static char msg[150];
+	      int len = snprintf(msg, sizeof(msg),"AX:%.2f AY:%.2f AZ:%.2f\r\n"
+											  "GX:%.2f GY:%.2f GZ:%.2f \r\n"
+	    		  	  	  	  	  	  	  	  "Roll:%.2f Pitch:%.2f\r\n",
+											  d.ax, d.ay, d.az, d.gx, d.gy, d.gz, d.roll, d.pitch);
 
-      CDC_Transmit_FS((uint8_t*)msg, len);
-      HAL_Delay(100);*/
-      mag.Process();         // usa el roll/pitch fresco del gyro
-      mag.ComputeHeading(imu.GetData().roll, imu.GetData().pitch);   // calcula heading aparte
-      /*
-      const QMC5883Data &d = mag.GetData();
+	      CDC_Transmit_FS((uint8_t*)msg, len);
+	      HAL_Delay(100);*/
+	      mag.Process();         // usa el roll/pitch fresco del gyro
+	      mag.ComputeHeading(imu.GetData().roll, imu.GetData().pitch);   // calcula heading aparte
+	      /*
+	      const QMC5883Data &d = mag.GetData();
 
-      static char msg[100];
-      int len = snprintf(msg, sizeof(msg),
-          "MX:%.2f MY:%.2f MZ:%.2f Heading:%.2f\r\n",
-          d.mx, d.my, d.mz, d.heading);
+	      static char msg[100];
+	      int len = snprintf(msg, sizeof(msg),
+	          "MX:%.2f MY:%.2f MZ:%.2f Heading:%.2f\r\n",
+	          d.mx, d.my, d.mz, d.heading);
 
-      CDC_Transmit_FS((uint8_t*)msg, len);
-      HAL_Delay(100);*/
-      static uint32_t lastGpsUpdate = 0;
-          if(HAL_GetTick() - lastGpsUpdate >= 200)
-          {
-              lastGpsUpdate = HAL_GetTick();
-              gps.Update();
+	      CDC_Transmit_FS((uint8_t*)msg, len);
+	      HAL_Delay(100);*/
+	      /*static uint32_t lastGpsUpdate = 0;
+	          if(HAL_GetTick() - lastGpsUpdate >= 200)
+	          {
+	              lastGpsUpdate = HAL_GetTick();
+	              gps.Update();
 
-              const GnssData &d = gps.GetData();
-              static char msg[300];
-              int len = snprintf(msg, sizeof(msg),
-                  "GPS\r\n"
-                  "Day: %d-%d-%d\r\n"
-                  "Time: %d:%d:%d\r\n"
-                  "Status of fix: %d\r\n"
-                  "Sat used: %d  Sat count: %d\r\n"
-                  "Lat: %f  Lon: %f\r\n"
-                  "Height ellip.(m): %f  Height MSL(m): %f\r\n"
-                  "Ground Speed(2D): %ld\r\n",
-                  d.day, d.month, d.year,
-                  d.hour, d.min, d.sec,
-                  d.fixType,
-                  d.numSV, d.satCount,
-                  d.fLat, d.fLon,
-                  static_cast<float>(d.height) / 1000.0f,
-                  static_cast<float>(d.hMSL) / 1000.0f,
-                  d.gSpeed);
-              CDC_Transmit_FS((uint8_t*)msg, len);
-          }
+	              const GnssData &d = gps.GetData();
+	              static char msg[300];
+	              int len = snprintf(msg, sizeof(msg),
+	                  "GPS\r\n"
+	                  "Day: %d-%d-%d\r\n"
+	                  "Time: %d:%d:%d\r\n"
+	                  "Status of fix: %d\r\n"
+	                  "Sat used: %d  Sat count: %d\r\n"
+	                  "Lat: %f  Lon: %f\r\n"
+	                  "Height ellip.(m): %f  Height MSL(m): %f\r\n"
+	                  "Ground Speed(2D): %ld\r\n",
+	                  d.day, d.month, d.year,
+	                  d.hour, d.min, d.sec,
+	                  d.fixType,
+	                  d.numSV, d.satCount,
+	                  d.fLat, d.fLon,
+	                  static_cast<float>(d.height) / 1000.0f,
+	                  static_cast<float>(d.hMSL) / 1000.0f,
+	                  d.gSpeed);
+	              CDC_Transmit_FS((uint8_t*)msg, len);
+	          }*/
+	      /*const MTF01_Data &d = flow.GetData();
+
+	      static uint32_t lastFlowUpdate = 0;
+	      if(HAL_GetTick() - lastFlowUpdate >= 100)
+	      {
+	          lastFlowUpdate = HAL_GetTick();
+
+	          static char msg[150];
+	          int len = snprintf(msg, sizeof(msg),
+	              "FLOW\r\n"
+	              "Distance: %.2f mm\r\n"
+	              "FlowX: %.2f  FlowY: %.2f\r\n"
+	              "Quality: %d  Status: %d\r\n",
+	              d.distance, d.flowX, d.flowY,
+	              d.quality, d.status);
+
+	          CDC_Transmit_FS((uint8_t*)msg, len);
+	      }*/
+	      radio.Process();
+
+	      if(radio.NewFrameAvailable() || true)  // o simplemente lee cuando quieras
+	      {
+	          static char msg[200];
+	          int len = snprintf(msg, sizeof(msg),
+	              "CRSF status=%d activeChannels=%d\r\n"
+	              "CH1:%d CH2:%d CH3:%d CH4:%d\r\n",
+	              radioData.status, radioData.activeChannels,
+	              radioData.ch[0], radioData.ch[1], radioData.ch[2], radioData.ch[3]);
+	          CDC_Transmit_FS((uint8_t*)msg, len);
+	      }
   }
   /* USER CODE END 3 */
 }
@@ -332,6 +375,39 @@ static void MX_UART4_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 420000;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief USART6 Initialization Function
   * @param None
   * @retval None
@@ -377,6 +453,12 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+  /* DMA1_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
 
 }
 

@@ -4,7 +4,6 @@
  *  Created on: 15 jul 2026
  *      Author: specter0163
  */
-
 #ifndef INC_GNSS_HPP_
 #define INC_GNSS_HPP_
 
@@ -44,10 +43,7 @@ public:
 
     void Init();
     void SetMode(GnssMode mode);
-
-    // Alterna internamente entre pedir PVT y NAV-SAT en cada llamada
     void Update();
-
     void ParseBuffer();
 
     const GnssData& GetData() const { return data_; }
@@ -55,6 +51,8 @@ public:
     uint8_t GetLastRxStatus() const { return lastRxStatus_; }
 
 private:
+    static constexpr uint16_t kBufferSize = 400;
+
     void LoadConfig();
     void RequestPVT();
     void RequestNAVSAT();
@@ -72,12 +70,12 @@ private:
                                  uint8_t &ckA, uint8_t &ckB);
 
     UART_HandleTypeDef *huart_;
-    uint8_t uartBuffer_[210] = {};
+    uint8_t uartBuffer_[kBufferSize] = {};
     GnssData data_;
 
     uint8_t lastTxStatus_ = 0;
     uint8_t lastRxStatus_ = 0;
-    bool requestNavSat_ = false;   // alterna PVT/NAV-SAT
+    bool requestNavSat_ = false;
 };
 
 #endif
