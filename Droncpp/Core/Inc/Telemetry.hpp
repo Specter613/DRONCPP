@@ -12,6 +12,54 @@
 #include <cstring>
 #include "mpu6500.hpp"
 #include "qmc5883p.hpp"
+#include "mtf02.hpp"
+
+
+enum class TelemetryMode : uint8_t{
+	Off= 0,
+	Gyro,
+	Mag,
+	Flow
+};
+
+struct Muestreo{
+	uint32_t tick = 0;
+	uint32_t deltaMs = 0;
+};
+
+class Telemetry{
+public:
+	Telemetry(MPU6500 &imu, QMC5883 &mag,MTF01 &flow);
+	void HandleCommand(const char *cmd);
+	void Update();
+	void ProcessPendingCalibration();
+
+	void GetMuestreo(TelemetryMode mode, uint32_t deltaMs);
+
+private:
+	void PrintGyro();
+	void PrintMag();
+	void PrintFlow();
+	void RunMagCalibration();
+
+	MPU6500 &imu_;
+	QMC5883 &mag_;
+	MTF01 &flow_;
+	TelemetryMode mode_ = TelemetryMode::Off;
+
+	volatile bool calMagRequested_ = false;
+	Muestreo muestreo_[3];
+};
+
+#endif
+/*
+#ifndef INC_TELEMETRY_HPP_
+#define INC_TELEMETRY_HPP_
+
+#include <cstdint>
+#include <cstring>
+#include "mpu6500.hpp"
+#include "qmc5883p.hpp"
 #include "gnss.hpp"
 #include "mtf02.hpp"
 #include "crsf.hpp"
@@ -27,6 +75,11 @@ enum class TelemetryMode : uint8_t
     Ekf,
 };
 
+struct SampleInfo{
+	uint32_t tick = 0;      // HAL_GetTick() en el momento exacto del muestreo
+	uint32_t deltaMs = 0;   // ms transcurridos desde el muestreo anterior de ESE sensor
+};
+
 class Telemetry
 {
 public:
@@ -38,6 +91,10 @@ public:
     // Llamar en el loop principal — imprime según el modo activo
     void Update();
     void ProcessPendingCalibration();
+
+    // Llamado por los trampolines del scheduler cada vez que un sensor
+    // se muestrea, para registrar cuándo ocurrió exactamente.
+    void MarkSample(TelemetryMode mode, uint32_t deltaMs);
 
 private:
     void PrintGyro();
@@ -56,6 +113,10 @@ private:
 
     TelemetryMode mode_ = TelemetryMode::Off;
     volatile bool calMagRequested_ = false;
+
+    // Índice por TelemetryMode (Off=0 no se usa, así que basta con
+    // reservar hasta Ekf).
+    SampleInfo sampleInfo_[7];
 };
 
-#endif
+#endif*/
