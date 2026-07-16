@@ -1,0 +1,170 @@
+/*
+ * Telemetry.cpp
+ *
+ *  Created on: 15 jul 2026
+ *      Author: specter0163
+ */
+
+#include "Telemetry.hpp"
+#include "usbd_cdc_if.h"
+#include <cstdio>
+#include "CompassStorage.hpp"
+
+Telemetry::Telemetry(MPU6500 &imu, QMC5883 &mag, Gnss &gps, MTF01 &flow, CRSF &radio)
+    : imu_(imu), mag_(mag), gps_(gps), flow_(flow), radio_(radio) {}
+
+void Telemetry::HandleCommand(const char *cmd)
+{
+    if(strcmp(cmd, "x") == 0)
+    {
+        mode_ = TelemetryMode::Off;
+        static const char msg[] = "Lectura detenida\r\nEscriba: GYRO MAG GPS FLOW ELRS EKF\r\n";
+        CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+    }
+    else if(strcmp(cmd, "GYRO") == 0)   mode_ = TelemetryMode::Gyro;
+    else if(strcmp(cmd, "MAG") == 0)    mode_ = TelemetryMode::Mag;
+    else if(strcmp(cmd, "GPS") == 0)    mode_ = TelemetryMode::Gps;
+    else if(strcmp(cmd, "FLOW") == 0)   mode_ = TelemetryMode::Flow;
+    else if(strcmp(cmd, "ELRS") == 0)   mode_ = TelemetryMode::Crsf;
+    else if(strcmp(cmd, "EKF") == 0)    mode_ = TelemetryMode::Ekf;
+    else if(strcmp(cmd, "CALMAG") == 0)
+    {
+        calMagRequested_ = true;
+    }
+    else if(strcmp(cmd, "CALSTATUS") == 0)
+    {
+        float ox, oy, oz;
+        static char msg[100];
+        int len;
+        if(MagCalibrationStorage::Load(ox, oy, oz))
+            len = snprintf(msg, sizeof(msg), "Calibracion presente: X=%.2f Y=%.2f Z=%.2f\r\n", ox, oy, oz);
+        else
+            len = snprintf(msg, sizeof(msg), "Sin calibracion guardada\r\n");
+        CDC_Transmit_FS((uint8_t*)msg, len);
+    }
+}
+
+void Telemetry::Update()
+{
+    switch(mode_)
+    {
+        case TelemetryMode::Gyro: PrintGyro(); break;
+        case TelemetryMode::Mag:  PrintMag();  break;
+        case TelemetryMode::Gps:  PrintGps();  break;
+        case TelemetryMode::Flow: PrintFlow(); break;
+        case TelemetryMode::Crsf: PrintCrsf(); break;
+        case TelemetryMode::Ekf:  PrintEkf();  break;
+        case TelemetryMode::Off:  default: break;
+    }
+}
+
+void Telemetry::PrintGyro()
+{
+    const MPU6500_Data &d = imu_.GetData();
+    static char msg[150];
+    int len = snprintf(msg, sizeof(msg),
+        "GYRO\r\nAX:%.2f AY:%.2f AZ:%.2f\r\nGX:%.2f GY:%.2f GZ:%.2f\r\nRoll:%.2f Pitch:%.2f\r\n",
+        d.ax, d.ay, d.az, d.gx, d.gy, d.gz, d.roll, d.pitch);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintMag()
+{
+    const QMC5883Data &d = mag_.GetData();
+    static char msg[100];
+    int len = snprintf(msg, sizeof(msg),
+        "MAG\r\nMX:%.2f MY:%.2f MZ:%.2f Heading:%.2f\r\n",
+        d.mx, d.my, d.mz, d.heading);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintGps()
+{
+    const GnssData &d = gps_.GetData();
+    static char msg[300];
+    int len = snprintf(msg, sizeof(msg),
+        "GPS\r\nDay: %d-%d-%d\r\nTime: %d:%d:%d\r\n"
+        "Status of fix: %d\r\nSat used: %d Sat count: %d\r\n"
+        "Lat: %f Lon: %f\r\nHeight ellip.(m): %.2f Height MSL(m): %.2f\r\n"
+        "Ground Speed(2D): %ld\r\n",
+        d.day, d.month, d.year, d.hour, d.min, d.sec,
+        d.fixType, d.numSV, d.satCount, d.fLat, d.fLon,
+        static_cast<float>(d.height)/1000.0f, static_cast<float>(d.hMSL)/1000.0f,
+        d.gSpeed);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintFlow()
+{
+    const MTF01_Data &d = flow_.GetData();
+    static char msg[150];
+    int len = snprintf(msg, sizeof(msg),
+        "FLOW\r\nDistance: %.2f mm\r\nFlowX: %.2f FlowY: %.2f\r\nQuality: %d Status: %d\r\n",
+        d.distance, d.flowX, d.flowY, d.quality, d.status);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintCrsf()
+{
+    const CRSF_Radio *d = radio_.GetDevice();
+    static char msg[200];
+    int len = snprintf(msg, sizeof(msg),
+        "ELRS\r\nStatus: %d ActiveChannels: %d\r\n"
+        "CH1:%d CH2:%d CH3:%d CH4:%d\r\n",
+        d->status, d->activeChannels, d->ch[0], d->ch[1], d->ch[2], d->ch[3]);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintEkf()
+{
+    // Placeholder hasta que EkfFeed esté terminado
+    static char msg[] = "EKF\r\n(pendiente de integrar)\r\n";
+    CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
+}
+
+void Telemetry::ProcessPendingCalibration()
+{
+    if(calMagRequested_)
+    {
+        calMagRequested_ = false;
+        RunMagCalibration();
+    }
+}
+
+void Telemetry::RunMagCalibration()
+{
+    int16_t minX = 32767, maxX = -32768;
+    int16_t minY = 32767, maxY = -32768;
+    int16_t minZ = 32767, maxZ = -32768;
+
+    const uint16_t samples = 500;
+    uint16_t count = 0;
+
+    static char msg[100];
+    int len = snprintf(msg, sizeof(msg), "CALIBRACION MAG: gira la placa ahora (%d muestras)\r\n", samples);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+
+    while(count < samples)
+    {
+        mag_.Calibration(minX, maxX, minY, maxY, minZ, maxZ);
+        count++;
+
+        if(count % (samples / 10) == 0)
+        {
+            len = snprintf(msg, sizeof(msg), "Progreso: %d%%\r\n", (count * 100) / samples);
+            CDC_Transmit_FS((uint8_t*)msg, len);
+        }
+        HAL_Delay(5);
+    }
+
+    float ox = (maxX + minX) / 2.0f / 1000.0f;
+    float oy = (maxY + minY) / 2.0f / 1000.0f;
+    float oz = (maxZ + minZ) / 2.0f / 1000.0f;
+
+    mag_.SetOffsets(ox, oy, oz);
+    MagCalibrationStorage::Save(ox, oy, oz);
+
+    len = snprintf(msg, sizeof(msg), "CALIBRACION completa. Offsets: X=%.2f Y=%.2f Z=%.2f\r\n", ox, oy, oz);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+

@@ -14,6 +14,7 @@ extern "C" {
 
 void App_Init(void);
 void App_Loop(void);
+void App_HandleCommand(char *cmd);
 
 #ifdef __cplusplus
 }
