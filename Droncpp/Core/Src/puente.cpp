@@ -11,20 +11,26 @@
 #include "mpu6500.hpp"
 #include "qmc5883p.hpp"
 #include "mtf02.hpp"
+#include "gnss.hpp"
 #include <cstring>
 #include "CompassStorage.hpp"
 
 extern SPI_HandleTypeDef hspi2;
 extern I2C_HandleTypeDef hi2c1;
 extern UART_HandleTypeDef huart6;
+extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart2;
 
 static MPU6500 imu(&hspi2);
 static QMC5883 mag(&hi2c1);
 static MTF01 flow(&huart6);
+static Gnss gps(&huart4);
+static CRSF_Radio radioData;
+static CRSF elrs(&huart2);
 
 
 
-static Telemetry telemetry(imu, mag, flow);
+static Telemetry telemetry(imu, mag, flow, gps, elrs);
 static Scheduler scheduler;
 
 static void GyroTask(void *ctx, uint32_t deltaMs)
@@ -40,24 +46,41 @@ static void MagTask(void *ctx, uint32_t deltaMs)
     telemetry.GetMuestreo(TelemetryMode::Mag, deltaMs);
 }
 
+static void GpsTask(void *ctx, uint32_t deltaMs)
+{
+    gps.Update();
+    telemetry.GetMuestreo(TelemetryMode::Gps, deltaMs);
+}
+
+static void ElrsTask(void *ctx, uint32_t deltaMs)
+{
+    elrs.Process();
+    telemetry.GetMuestreo(TelemetryMode::Elrs, deltaMs);
+}
+
 extern "C" void App_Init(void)
 {
     imu.Init();
     imu.CalibrateGyro();
     imu.CalibrateAccel();
     mag.Init();
-    flow.Init();
-
     float ox, oy, oz;
     if(MagCalibrationStorage::Load(ox, oy, oz))
     {
         mag.SetOffsets(ox, oy, oz);
     }
+    flow.Init();
+    gps.Init();
+    gps.SetMode(GnssMode::Stationary);
+    HAL_Delay(250);
+    elrs.Init(&radioData);
 
 
     // Registro de tareas periódicas — mismos periodos que ya usabas
     scheduler.AddTask(GyroTask, nullptr, 5);
     scheduler.AddTask(MagTask,  nullptr, 5);
+    scheduler.AddTask(GpsTask, nullptr, 200);
+    scheduler.AddTask(ElrsTask, nullptr, 2);
 }
 
 extern "C" void App_Loop(void)

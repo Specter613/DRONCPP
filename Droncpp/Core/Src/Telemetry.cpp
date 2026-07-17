@@ -10,8 +10,8 @@
 #include <cstdio>
 #include "CompassStorage.hpp"
 
-Telemetry::Telemetry(MPU6500 &imu, QMC5883 &mag, MTF01 &flow)
-		: imu_(imu), mag_(mag), flow_(flow) {}
+Telemetry::Telemetry(MPU6500 &imu, QMC5883 &mag, MTF01 &flow, Gnss &gps, CRSF &elrs)
+		: imu_(imu), mag_(mag), flow_(flow), gps_(gps), elrs_(elrs){}
 
 void Telemetry::HandleCommand(const char *cmd){
 	if(strcmp(cmd,"x") == 0){
@@ -23,6 +23,8 @@ void Telemetry::HandleCommand(const char *cmd){
 	else if(strcmp(cmd,"GYRO") == 0) mode_ = TelemetryMode::Gyro;
 	else if(strcmp(cmd, "MAG") == 0)    mode_ = TelemetryMode::Mag;
 	else if(strcmp(cmd, "FLOW") == 0)    mode_ = TelemetryMode::Flow;
+	else if(strcmp(cmd,"GPS") == 0) mode_ = TelemetryMode::Gps;
+	else if(strcmp(cmd,"ELRS") == 0) mode_ =TelemetryMode::Elrs;
     else if(strcmp(cmd, "CALMAG") == 0)
     {
         calMagRequested_ = true;
@@ -42,9 +44,11 @@ void Telemetry::HandleCommand(const char *cmd){
 
 void Telemetry::Update(){
 	switch(mode_){
-	case TelemetryMode::Gyro : PrintGyro(); break;
+	case TelemetryMode::Gyro: PrintGyro(); break;
 	case TelemetryMode::Mag:  PrintMag();  break;
 	case TelemetryMode::Flow:  PrintFlow();  break;
+	case TelemetryMode::Gps: PrintGps(); break;
+	case TelemetryMode::Elrs: PrintElrs(); break;
 	case TelemetryMode::Off:  default: break;
 	}
 }
@@ -93,6 +97,38 @@ void Telemetry::PrintFlow()
         "FLOW\r\nDistance: %.2f mm\r\nFlowX: %.2f FlowY: %.2f\r\nQuality: %d Status: %d\r\n"
         "consultado en tick:%lu\r\n",
         d.distance, d.flowX, d.flowY, d.quality, d.status, HAL_GetTick());
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintGps()
+{
+    const GnssData &d = gps_.GetData();
+    const Muestreo &s = muestreo_[static_cast<uint8_t>(TelemetryMode::Gps)];
+
+    static char msg[350];
+    int len = snprintf(msg, sizeof(msg),
+        "GPS\r\nDay: %d-%d-%d\r\nTime: %d:%d:%d\r\n"
+        "Status of fix: %d\r\nSat used: %d Sat count: %d\r\n"
+        "Lat: %f Lon: %f\r\nHeight ellip.(m): %.2f Height MSL(m): %.2f\r\n"
+        "Ground Speed(2D): %ld\r\ntick:%lu dt:%lums\r\n",
+        d.day, d.month, d.year, d.hour, d.min, d.sec,
+        d.fixType, d.numSV, d.satCount, d.fLat, d.fLon,
+        static_cast<float>(d.height)/1000.0f, static_cast<float>(d.hMSL)/1000.0f,
+        d.gSpeed, s.tick, s.deltaMs);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintElrs()
+{
+    const CRSF_Radio *d = elrs_.GetDevice();
+    const Muestreo &s = muestreo_[static_cast<uint8_t>(TelemetryMode::Elrs)];
+
+    static char msg[220];
+    int len = snprintf(msg, sizeof(msg),
+        "ELRS\r\nStatus: %d ActiveChannels: %d\r\n"
+        "CH1:%d CH2:%d CH3:%d CH4:%d\r\ntick:%lu dt:%lums\r\n",
+        d->status, d->activeChannels, d->ch[0], d->ch[1], d->ch[2], d->ch[3],
+        s.tick, s.deltaMs);
     CDC_Transmit_FS((uint8_t*)msg, len);
 }
 

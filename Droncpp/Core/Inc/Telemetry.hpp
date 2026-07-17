@@ -13,13 +13,18 @@
 #include "mpu6500.hpp"
 #include "qmc5883p.hpp"
 #include "mtf02.hpp"
+#include "gnss.hpp"
+#include "crsf.hpp"
 
 
 enum class TelemetryMode : uint8_t{
 	Off= 0,
 	Gyro,
 	Mag,
-	Flow
+	Flow,
+	Gps,
+	Elrs,
+	_Count
 };
 
 struct Muestreo{
@@ -29,7 +34,7 @@ struct Muestreo{
 
 class Telemetry{
 public:
-	Telemetry(MPU6500 &imu, QMC5883 &mag,MTF01 &flow);
+	Telemetry(MPU6500 &imu, QMC5883 &mag,MTF01 &flow, Gnss &gps, CRSF &elrs);
 	void HandleCommand(const char *cmd);
 	void Update();
 	void ProcessPendingCalibration();
@@ -40,15 +45,19 @@ private:
 	void PrintGyro();
 	void PrintMag();
 	void PrintFlow();
+	void PrintGps();
+	void PrintElrs();
 	void RunMagCalibration();
 
 	MPU6500 &imu_;
 	QMC5883 &mag_;
 	MTF01 &flow_;
+	Gnss &gps_;
+	CRSF &elrs_;
 	TelemetryMode mode_ = TelemetryMode::Off;
 
 	volatile bool calMagRequested_ = false;
-	Muestreo muestreo_[3];
+	Muestreo muestreo_[static_cast<uint8_t>(TelemetryMode::_Count)]; // Automaticamente crea un array con el total de enum class TelemetryMode
 };
 
 #endif
