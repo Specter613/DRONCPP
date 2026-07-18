@@ -17,6 +17,10 @@
 #include "ekf.hpp"
 #include <cmath>
 
+extern "C" {
+#include "Mavlink/common/mavlink.h"
+}
+
 extern SPI_HandleTypeDef hspi2;
 extern I2C_HandleTypeDef hi2c1;
 extern UART_HandleTypeDef huart6;
