@@ -10,8 +10,8 @@
 #include <cstdio>
 #include "CompassStorage.hpp"
 
-Telemetry::Telemetry(MPU6500 &imu, QMC5883 &mag, MTF01 &flow, Gnss &gps, CRSF &elrs)
-		: imu_(imu), mag_(mag), flow_(flow), gps_(gps), elrs_(elrs){}
+Telemetry::Telemetry(MPU6500 &imu, QMC5883 &mag, MTF01 &flow, Gnss &gps, CRSF &elrs, Ekf &ekf)
+		: imu_(imu), mag_(mag), flow_(flow), gps_(gps), elrs_(elrs), ekf_(ekf){}
 
 void Telemetry::HandleCommand(const char *cmd){
 	if(strcmp(cmd,"x") == 0){
@@ -25,6 +25,7 @@ void Telemetry::HandleCommand(const char *cmd){
 	else if(strcmp(cmd, "FLOW") == 0)    mode_ = TelemetryMode::Flow;
 	else if(strcmp(cmd,"GPS") == 0) mode_ = TelemetryMode::Gps;
 	else if(strcmp(cmd,"ELRS") == 0) mode_ =TelemetryMode::Elrs;
+	else if(strcmp(cmd,"EKF") == 0) mode_ = TelemetryMode::Ekf;
     else if(strcmp(cmd, "CALMAG") == 0)
     {
         calMagRequested_ = true;
@@ -49,6 +50,7 @@ void Telemetry::Update(){
 	case TelemetryMode::Flow:  PrintFlow();  break;
 	case TelemetryMode::Gps: PrintGps(); break;
 	case TelemetryMode::Elrs: PrintElrs(); break;
+	case TelemetryMode::Ekf:  PrintEkf();  break;
 	case TelemetryMode::Off:  default: break;
 	}
 }
@@ -129,6 +131,19 @@ void Telemetry::PrintElrs()
         "CH1:%d CH2:%d CH3:%d CH4:%d\r\ntick:%lu dt:%lums\r\n",
         d->status, d->activeChannels, d->ch[0], d->ch[1], d->ch[2], d->ch[3],
         s.tick, s.deltaMs);
+    CDC_Transmit_FS((uint8_t*)msg, len);
+}
+
+void Telemetry::PrintEkf()
+{
+    float roll, pitch, yaw;
+    ekf_.GetEuler(roll, pitch, yaw);
+    const Muestreo &s = muestreo_[static_cast<uint8_t>(TelemetryMode::Ekf)];
+
+    static char msg[150];
+    int len = snprintf(msg, sizeof(msg),
+        "EKF\r\nRoll:%.2f Pitch:%.2f Yaw:%.2f\r\ntick:%lu dt:%lums\r\n",
+        roll, pitch, yaw, s.tick, s.deltaMs);
     CDC_Transmit_FS((uint8_t*)msg, len);
 }
 

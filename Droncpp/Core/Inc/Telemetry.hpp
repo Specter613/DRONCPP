@@ -15,6 +15,7 @@
 #include "mtf02.hpp"
 #include "gnss.hpp"
 #include "crsf.hpp"
+#include "ekf.hpp"
 
 
 enum class TelemetryMode : uint8_t{
@@ -24,6 +25,7 @@ enum class TelemetryMode : uint8_t{
 	Flow,
 	Gps,
 	Elrs,
+	Ekf,
 	_Count
 };
 
@@ -34,7 +36,7 @@ struct Muestreo{
 
 class Telemetry{
 public:
-	Telemetry(MPU6500 &imu, QMC5883 &mag,MTF01 &flow, Gnss &gps, CRSF &elrs);
+	Telemetry(MPU6500 &imu, QMC5883 &mag,MTF01 &flow, Gnss &gps, CRSF &elrs, Ekf &ekf);
 	void HandleCommand(const char *cmd);
 	void Update();
 	void ProcessPendingCalibration();
@@ -47,6 +49,7 @@ private:
 	void PrintFlow();
 	void PrintGps();
 	void PrintElrs();
+	void PrintEkf();
 	void RunMagCalibration();
 
 	MPU6500 &imu_;
@@ -54,6 +57,7 @@ private:
 	MTF01 &flow_;
 	Gnss &gps_;
 	CRSF &elrs_;
+	Ekf &ekf_;
 	TelemetryMode mode_ = TelemetryMode::Off;
 
 	volatile bool calMagRequested_ = false;

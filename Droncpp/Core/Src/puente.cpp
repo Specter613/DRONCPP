@@ -14,6 +14,8 @@
 #include "gnss.hpp"
 #include <cstring>
 #include "CompassStorage.hpp"
+#include "ekf.hpp"
+#include <cmath>
 
 extern SPI_HandleTypeDef hspi2;
 extern I2C_HandleTypeDef hi2c1;
@@ -27,10 +29,10 @@ static MTF01 flow(&huart6);
 static Gnss gps(&huart4);
 static CRSF_Radio radioData;
 static CRSF elrs(&huart2);
+static Ekf ekf;
 
 
-
-static Telemetry telemetry(imu, mag, flow, gps, elrs);
+static Telemetry telemetry(imu, mag, flow, gps, elrs, ekf);
 static Scheduler scheduler;
 
 static void GyroTask(void *ctx, uint32_t deltaMs)
@@ -58,6 +60,20 @@ static void ElrsTask(void *ctx, uint32_t deltaMs)
     telemetry.GetMuestreo(TelemetryMode::Elrs, deltaMs);
 }
 
+static void EkfTask(void *ctx, uint32_t deltaMs)
+{
+    constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
+    float dt = deltaMs / 1000.0f;
+
+    const MPU6500_Data &imuData = imu.GetData();
+
+    ekf.Predict(imuData.gx * DEG2RAD, imuData.gy * DEG2RAD, imuData.gz * DEG2RAD, dt);
+    ekf.UpdateAccel(imuData.ax, imuData.ay, imuData.az);
+    ekf.UpdateYaw(mag.GetData().heading);
+
+    telemetry.GetMuestreo(TelemetryMode::Ekf, deltaMs);
+}
+
 extern "C" void App_Init(void)
 {
     imu.Init();
@@ -81,6 +97,7 @@ extern "C" void App_Init(void)
     scheduler.AddTask(MagTask,  nullptr, 5);
     scheduler.AddTask(GpsTask, nullptr, 200);
     scheduler.AddTask(ElrsTask, nullptr, 2);
+    scheduler.AddTask(EkfTask,  nullptr, 5);
 }
 
 extern "C" void App_Loop(void)
