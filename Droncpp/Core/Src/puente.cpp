@@ -16,6 +16,7 @@
 #include "CompassStorage.hpp"
 #include "ekf.hpp"
 #include <cmath>
+#include "mavlink_link.hpp"
 
 extern "C" {
 #include "Mavlink/common/mavlink.h"
@@ -34,6 +35,8 @@ static Gnss gps(&huart4);
 static CRSF_Radio radioData;
 static CRSF elrs(&huart2);
 static Ekf ekf;
+
+static MavlinkLink mavlink;
 
 
 static Telemetry telemetry(imu, mag, flow, gps, elrs, ekf);
@@ -78,6 +81,30 @@ static void EkfTask(void *ctx, uint32_t deltaMs)
     telemetry.GetMuestreo(TelemetryMode::Ekf, deltaMs);
 }
 
+static void MavlinkHeartbeatTask(void *ctx, uint32_t deltaMs)
+{
+    mavlink.SendHeartbeat();
+}
+
+static void MavlinkAttitudeTask(void *ctx, uint32_t deltaMs)
+{
+    float roll, pitch, yaw;
+    ekf.GetEuler(roll, pitch, yaw);
+
+    constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
+    mavlink.SendAttitude(roll * DEG2RAD, pitch * DEG2RAD, yaw * DEG2RAD, 0, 0, 0);
+}
+
+static void MavlinkPositionTask(void *ctx, uint32_t deltaMs)
+{
+    const GnssData &d = gps.GetData();
+    mavlink.SendGlobalPosition(d.fLat, d.fLon,
+        static_cast<float>(d.hMSL) / 1000.0f,
+        static_cast<float>(d.height) / 1000.0f,
+        0, 0, 0,   // velocidad NED — pendiente hasta que tengas eso calculado
+        0);        // heading — pendiente de conectar mag.GetData().heading
+}
+
 extern "C" void App_Init(void)
 {
     imu.Init();
@@ -102,6 +129,10 @@ extern "C" void App_Init(void)
     scheduler.AddTask(GpsTask, nullptr, 200);
     scheduler.AddTask(ElrsTask, nullptr, 2);
     scheduler.AddTask(EkfTask,  nullptr, 5);
+
+    scheduler.AddTask(MavlinkHeartbeatTask, nullptr, 1000);   // 1Hz, estándar MAVLink
+    scheduler.AddTask(MavlinkAttitudeTask,  nullptr, 100);    // 10Hz
+    scheduler.AddTask(MavlinkPositionTask,  nullptr, 200);    // 5Hz, alineado con GPS
 }
 
 extern "C" void App_Loop(void)
