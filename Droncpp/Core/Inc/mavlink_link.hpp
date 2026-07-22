@@ -30,6 +30,8 @@ public:
 							float vx, float vy, float vz, float heading_deg);
 	// voltage en mV, current en 10*mA (o -1 si no disponible), remaining en % (0-100, o -1 si no disponible)
 	void SendSysStatus(uint16_t voltage_mV, int16_t current_10mA, int8_t remaining_pct);
+
+	void SendOpticalFlow(float distance_mm, float flowX, float flowY, uint8_t quality);
 private:
 	void SendMessage(mavlink_message_t &msg);
 

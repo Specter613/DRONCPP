@@ -74,3 +74,23 @@ void MavlinkLink::SendSysStatus(uint16_t voltage_mV, int16_t current_10mA, int8_
 
     SendMessage(msg);
 }
+
+void MavlinkLink::SendOpticalFlow(float distance_mm, float flowX, float flowY, uint8_t quality)
+{
+    mavlink_message_t msg;
+
+    //float distance_m = distance_mm / 1000.0f;
+    //float flowCompX = (flowX / 100.0f) * distance_m;   // cm/s → m/s, escalado por altura
+    //float flowCompY = (flowY / 100.0f) * distance_m;
+
+    mavlink_msg_optical_flow_pack(kSystemId, kComponentId, &msg,
+        HAL_GetTick() * 1000ULL,   // time_usec (aproximación, ver nota abajo)
+        0,                          // sensor_id
+        flowX, flowY,               // flujo crudo (cuentas del sensor)
+        0.0f, 0.0f,                 // flow_comp_m_x/y — necesitarías escalar según altura, ver nota
+        quality,
+        distance_mm / 1000.0f,      // ground_distance, en metros
+        0.0f, 0.0f);                // flow_rate_x/y — opcional, dejamos en 0
+
+    SendMessage(msg);
+}

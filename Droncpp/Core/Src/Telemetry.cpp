@@ -128,8 +128,8 @@ void Telemetry::PrintElrs()
     static char msg[220];
     int len = snprintf(msg, sizeof(msg),
         "ELRS\r\nStatus: %d ActiveChannels: %d\r\n"
-        "CH1:%d CH2:%d CH3:%d CH4:%d\r\ntick:%lu dt:%lums\r\n",
-        d->status, d->activeChannels, d->ch[0], d->ch[1], d->ch[2], d->ch[3],
+        "CH1:%d CH2:%d CH3:%d CH4:%d CH5:%d\r\ntick:%lu dt:%lums\r\n",
+        d->status, d->activeChannels, d->ch[0], d->ch[1], d->ch[2], d->ch[3], d->ch[4],
         s.tick, s.deltaMs);
     CDC_Transmit_FS((uint8_t*)msg, len);
 }

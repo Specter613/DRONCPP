@@ -17,6 +17,8 @@
 #include "ekf.hpp"
 #include <cmath>
 #include "mavlink_link.hpp"
+#include "motor_controller.hpp"
+#include "usbd_cdc_if.h"//quitar
 
 extern "C" {
 #include "Mavlink/common/mavlink.h"
@@ -27,7 +29,10 @@ extern I2C_HandleTypeDef hi2c1;
 extern UART_HandleTypeDef huart6;
 extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart2;
+extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim4;
 
+static MotorController motors(&htim3, &htim4);
 static MPU6500 imu(&hspi2);
 static QMC5883 mag(&hi2c1);
 static MTF01 flow(&huart6);
@@ -37,6 +42,8 @@ static CRSF elrs(&huart2);
 static Ekf ekf;
 
 static MavlinkLink mavlink;
+
+
 
 
 static Telemetry telemetry(imu, mag, flow, gps, elrs, ekf);
@@ -91,12 +98,17 @@ static void MavlinkAttitudeTask(void *ctx, uint32_t deltaMs)
     float roll, pitch, yaw;
     ekf.GetEuler(roll, pitch, yaw);
 
+    const MPU6500_Data &imuData = imu.GetData();
+
     constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
-    mavlink.SendAttitude(roll * DEG2RAD, pitch * DEG2RAD, yaw * DEG2RAD, 0, 0, 0);
+    mavlink.SendAttitude(
+        roll * DEG2RAD, pitch * DEG2RAD, yaw * DEG2RAD,
+        imuData.gx * DEG2RAD,   // rollspeed, rad/s
+        imuData.gy * DEG2RAD,   // pitchspeed, rad/s
+        imuData.gz * DEG2RAD);  // yawspeed, rad/s
 }
 
-static void MavlinkPositionTask(void *ctx, uint32_t deltaMs)
-{
+static void MavlinkPositionTask(void *ctx, uint32_t deltaMs){
     const GnssData &d = gps.GetData();
     mavlink.SendGlobalPosition(d.fLat, d.fLon,
         static_cast<float>(d.hMSL) / 1000.0f,
@@ -105,8 +117,37 @@ static void MavlinkPositionTask(void *ctx, uint32_t deltaMs)
         0);        // heading — pendiente de conectar mag.GetData().heading
 }
 
+static void MavlinkFlowTask(void *ctx, uint32_t deltaMs){
+    const MTF01_Data &d = flow.GetData();
+    mavlink.SendOpticalFlow(d.distance, d.flowX, d.flowY, d.quality);
+}
+
+static void MotorTask(void *ctx, uint32_t deltaMs)
+{
+    const CRSF_Radio *r =elrs.GetDevice();
+
+    bool signalLost = (r->status == CRSF_SIGNAL_LOST);
+
+    // Canales principales: 1=throttle, 2=roll, 3=pitch, 4=yaw
+    float throttle = (r->ch[0] - 172) / (float)(1811 - 172);
+    float roll     = (r->ch[1] - 992) / 820.0f;
+    float pitch    = (r->ch[2] - 992) / 820.0f;
+    float yaw      = (r->ch[3] - 992) / 820.0f;
+
+    // Canal de armado dedicado — CANAL_ARMADO define cuál usar (5 a 16)
+    // ch[] es 0-indexado, así que canal 5 físico = índice 4
+    constexpr uint8_t CANAL_ARMADO = 4;   // <-- AJUSTA aquí: 4=canal5, 5=canal6, ..., 15=canal16
+    bool armed = (r->ch[CANAL_ARMADO] > 1500);
+
+    motors.Update(armed, signalLost, throttle, roll, pitch, yaw);
+}
+
 extern "C" void App_Init(void)
 {
+    // PRUEBA AISLADA DEL LED — antes de cualquier otra cosa
+    // PRUEBA DIRECTA: PWM escrito manualmente, sin pasar por MotorController
+
+
     imu.Init();
     imu.CalibrateGyro();
     imu.CalibrateAccel();
@@ -130,9 +171,13 @@ extern "C" void App_Init(void)
     scheduler.AddTask(ElrsTask, nullptr, 2);
     scheduler.AddTask(EkfTask,  nullptr, 5);
 
-    scheduler.AddTask(MavlinkHeartbeatTask, nullptr, 1000);   // 1Hz, estándar MAVLink
-    scheduler.AddTask(MavlinkAttitudeTask,  nullptr, 100);    // 10Hz
-    scheduler.AddTask(MavlinkPositionTask,  nullptr, 200);    // 5Hz, alineado con GPS
+    //scheduler.AddTask(MavlinkHeartbeatTask, nullptr, 1000);   // 1Hz, estándar MAVLink
+    //scheduler.AddTask(MavlinkAttitudeTask,  nullptr, 100);    // 10Hz
+    //scheduler.AddTask(MavlinkPositionTask,  nullptr, 200);    // 5Hz, alineado con GPS
+    // en App_Init()
+    //scheduler.AddTask(MavlinkFlowTask, nullptr, 50);   // igual que tu Telemetry, 20Hz
+    //scheduler.AddTask(MotorTask, nullptr, 4);
+
 }
 
 extern "C" void App_Loop(void)
@@ -140,6 +185,7 @@ extern "C" void App_Loop(void)
     scheduler.Run();
     telemetry.ProcessPendingCalibration();
     telemetry.Update();
+
 }
 
 extern "C" void App_HandleCommand(char *cmd)
